@@ -232,7 +232,7 @@ class Interface(Frame):
         equipment_known = False
         client_finished = False
         server_finished = False
-        while client_finished == False or server_finished == False:
+        while not client_finished or not server_finished:
             connexions_demandees, wlist, xlist = select.select([main_connection], [], [], 0.05)
 
             for connexion in connexions_demandees:
