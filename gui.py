@@ -6,6 +6,8 @@ from tkinter import *
 from tkinter.messagebox import askquestion
 from threading import Thread
 
+import matplotlib.pyplot as plt
+import networkx as nx
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.hazmat.backends import default_backend
@@ -21,6 +23,8 @@ class Interface(Frame):
         Frame.__init__(self, window, width=900, height=900)
         self.__id_equipment = id_equipment
         self.__e = Equipment(name="Equipment {}".format(id_equipment))
+        self.graph = nx.DiGraph()
+        self.graph.add_node(id_equipment, cert=self.__e.byte_cert())
         self.__ca = []
         self.__da = []
 
@@ -33,8 +37,7 @@ class Interface(Frame):
         but_DA = Button(window, text='DA', command=self.click_DA)
 
         # New equipment
-        self.txt_equipment_type = Label(window, text='Type of this equipment',
-                                        wraplength=70)  # voir si retour a la ligne auto géré par Label
+        self.txt_equipment_type = Label(window, text='Type of this equipment', wraplength=70)
         self.equipment_type = ttk.Combobox(window, values=EQUIPMENT_TYPES)
         self.equipment_type.current(0)
 
@@ -72,6 +75,10 @@ class Interface(Frame):
         text = self.display_cert(cert)
         self.txt_box.delete("1.0", END)
         self.txt_box.insert(END, text)
+        nx.draw(self.graph,pos=nx.spring_layout(self.graph))  # networkx draw()
+        # plt.draw()
+        plt.show()
+
 
     def click_CA(self):
         number_of_ca = 'Number of CA : {} \n\n'.format(len(self.__ca))
@@ -95,7 +102,8 @@ class Interface(Frame):
 
     def display_cert(self, cert):
         text = '\n'.join([
-            'Version : {}'.format(cert.version),
+            'Version : {}'.format(str(cert.version)[str(cert.version).find(".") + 1:]),
+            'Serial number : {}'.format(cert.serial_number),
             'Not valid before : {}'.format(cert.not_valid_before),
             'Not valid after : {}'.format(cert.not_valid_after),
             'Public Key : {}'.format(cert.public_key()),
@@ -139,7 +147,7 @@ class Interface(Frame):
             msg_for_sync.append('ca')
             for ca in self.__ca:
                 msg_for_sync.append(ca['cert'])
-        msg_for_sync.append(b'end')
+        # msg_for_sync.append(b'end')
 
         if self.equipment_type.get() == 'client':
             t = Thread(name='client_thread', target=self.client, args=(int(port_number), msg_for_sync, 'sync',))
@@ -173,13 +181,19 @@ class Interface(Frame):
         if mode == 'insert':
             result = askquestion('Equipment {} - Connection'.format(self.__id_equipment),
                                  'Authorized Equipment {} to be connected ?'.format(info_received['id']))
-        else:
+        elif mode == 'sync':
             result = 'yes'
         if result == 'yes':
+            self.graph.add_node(info_received['id'])
             issuer_public_key = load_pem_public_key(pubkey_received, backend=default_backend())
-            certificate_of_the_other_equipment_in_e = self.__e.generate_certificate(issuer_name, issuer_public_key, 10)
-            self.__e.verify_certif(certificate_of_the_other_equipment_in_e, self.__e.pubkey())
-            byte_cert = certificate_of_the_other_equipment_in_e.public_bytes(encoding=serialization.Encoding.PEM)
+            cert = self.__e.generate_certificate(issuer_name, issuer_public_key, 10)
+            # self.__e.verify_certif(cert, self.__e.pubkey())
+            byte_cert = cert.public_bytes(encoding=serialization.Encoding.PEM)
+            self.graph.add_edge(self.__id_equipment, info_received['id'], cert=byte_cert)
+            self.__ca.append({'id': info_received['id'],
+                              'pubkey': info_received['pubkey'],
+                              'cert': byte_cert}
+                             )
             return byte_cert
         else:
             txt = "Connection non établie"
@@ -411,6 +425,7 @@ class Interface(Frame):
 
         print('Fermeture client')
         connection_with_server.close()
+
 
 
 f1 = Tk()
