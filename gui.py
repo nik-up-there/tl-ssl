@@ -234,10 +234,9 @@ class Interface(Frame):
                             state = 'cert'
                         else:
                             if not equipment_known:
-                                equipment_known = self.verify_proof(cert_chain_other_equipment)
-                            if not equipment_known:
-                                server_finished = True
-                                client_finished = True
+                                if not self.verify_proof(cert_chain_other_equipment):
+                                    server_finished = True
+                                    client_finished = True
                             else:
                                 self_cert_received = self.state_self_cert(received_msg=tmp_self_cert_received)
                                 state = 'cert'
@@ -260,11 +259,10 @@ class Interface(Frame):
                             else:
                                 msg.insert(i + 2, 'not know')
                         elif state == 'proof':
-                            if not cert_chain and received_msg != 'not know':
-                                msg.insert(i, 'not know')
-                            else:
+                            if not cert_chain and received_msg == 'not know':
                                 msg.insert(i, 'stop')
-                            if received_msg != 'not know' and received_msg != 'No more message to send':
+                            elif not cert_chain:
+                                msg.insert(i, 'not know')
                                 cert_chain_other_equipment.append(received_msg)
                         elif state == 'cert':
                             self.state_cert(received_msg=received_msg, self_cert_received=self_cert_received)
@@ -280,11 +278,11 @@ class Interface(Frame):
                         if msg_to_send == 'cert':
                             if mode == 'insert':
                                 msg[i + 1] = self.insertion_equipment(self_cert_received, mode)
-                            elif mode == 'sync' and equipment_known is True:
-                                msg[i + 1] = self.insertion_equipment(self_cert_received, mode)
+                                if msg[i+1] == b'end':
+                                    msg_to_send = b'end'
+                                    state = 'end'
                             else:
-                                server_finished = True
-                                client_finished = True
+                                msg[i + 1] = self.insertion_equipment(self_cert_received, mode)
                     try:
                         msg_to_send = msg_to_send.encode()
                     except:
@@ -320,16 +318,13 @@ class Interface(Frame):
                     client_finished = True
                 msg_to_send = msg[i]
                 if msg_to_send == 'cert':
-                    if not equipment_known and mode == 'sync':
-                        server_finished = True
-                        client_finished = True
                     if mode == 'insert':
                         msg[i + 1] = self.insertion_equipment(self_cert_received, mode)
-                    elif mode == 'sync' and equipment_known is True:
-                        msg[i + 1] = self.insertion_equipment(self_cert_received, mode)
+                        if msg[i + 1] == b'end':
+                            msg_to_send = b'end'
+                            state = 'end'
                     else:
-                        server_finished = True
-                        client_finished = True
+                        msg[i + 1] = self.insertion_equipment(self_cert_received, mode)
 
             try:
                 msg_to_send = msg_to_send.encode()
@@ -337,14 +332,14 @@ class Interface(Frame):
                 pass
             # Sending messages
             connection_with_server.send(msg_to_send)
-            print('client send {}'.format(msg_to_send))
+            # print('client send {}'.format(msg_to_send))
             # Received messages
             received_msg = connection_with_server.recv(2048)
             try:
                 received_msg = received_msg.decode()
             except:
                 pass
-
+            # print('client rcv {}'.format(received_msg))
             if received_msg == 'stop':
                 server_finished = True
                 client_finished = True
@@ -359,11 +354,11 @@ class Interface(Frame):
                 if mode == 'insert':
                     state = 'cert'
                 else:
+                    # Si l'on connait déjà l'equipement pas besoin de vérifier la chaine de certificat
                     if not equipment_known:
-                        equipment_known = self.verify_proof(cert_chain_other_equipment)
-                    if not equipment_known:
-                        server_finished = True
-                        client_finished = True
+                        if not self.verify_proof(cert_chain_other_equipment):
+                            server_finished = True
+                            client_finished = True
                     else:
                         self_cert_received = self.state_self_cert(received_msg=tmp_self_cert_received)
                         state = 'cert'
@@ -386,11 +381,10 @@ class Interface(Frame):
                     else:
                         msg.insert(i + 2, 'not know')
                 elif state == 'proof':
-                    if not cert_chain and received_msg != 'not know':
+                    if not cert_chain and received_msg == 'not know':
+                        msg.insert(i, 'stop')
+                    elif not cert_chain:
                         msg.insert(i, 'not know')
-                    else:
-                        msg.insert(i+1, 'stop')
-                    if received_msg != 'not know' and received_msg != 'No more message to send':
                         cert_chain_other_equipment.append(received_msg)
                 elif state == 'cert':
                     self.state_cert(received_msg=received_msg, self_cert_received=self_cert_received)
