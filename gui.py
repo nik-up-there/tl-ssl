@@ -220,6 +220,10 @@ class Interface(Frame):
                         received_msg = received_msg.decode()
                     except:
                         pass
+                    if received_msg == 'stop':
+                        server_finished = True
+                        client_finished = True
+                        state = 'end'
 
                     if received_msg == 'self_cert':
                         state = 'self_cert'
@@ -256,8 +260,10 @@ class Interface(Frame):
                             else:
                                 msg.insert(i + 2, 'not know')
                         elif state == 'proof':
-                            if not cert_chain:
+                            if not cert_chain and received_msg != 'not know':
                                 msg.insert(i, 'not know')
+                            else:
+                                msg.insert(i, 'stop')
                             if received_msg != 'not know' and received_msg != 'No more message to send':
                                 cert_chain_other_equipment.append(received_msg)
                         elif state == 'cert':
@@ -331,13 +337,19 @@ class Interface(Frame):
                 pass
             # Sending messages
             connection_with_server.send(msg_to_send)
-
+            print('client send {}'.format(msg_to_send))
             # Received messages
             received_msg = connection_with_server.recv(2048)
             try:
                 received_msg = received_msg.decode()
             except:
                 pass
+
+            if received_msg == 'stop':
+                server_finished = True
+                client_finished = True
+                connection_with_server.send('stop'.encode())
+                state = 'end'
 
             if received_msg == 'self_cert':
                 state = 'self_cert'
@@ -374,8 +386,10 @@ class Interface(Frame):
                     else:
                         msg.insert(i + 2, 'not know')
                 elif state == 'proof':
-                    if not cert_chain:
+                    if not cert_chain and received_msg != 'not know':
                         msg.insert(i, 'not know')
+                    else:
+                        msg.insert(i+1, 'stop')
                     if received_msg != 'not know' and received_msg != 'No more message to send':
                         cert_chain_other_equipment.append(received_msg)
                 elif state == 'cert':
