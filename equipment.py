@@ -35,7 +35,7 @@ class Equipment:
     def byte_cert(self):
         return self.__cert.byte_cert()
 
-    def generate_certificate(self, issuer_name, pubkey, validity_date):
+    def generate_certificate(self, issuer_name, issuer_pubkey, validity_date):
         now = datetime.datetime.utcnow()
         # Creation du certificat
         subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, self.__name)])
@@ -43,7 +43,7 @@ class Equipment:
         cert = x509.CertificateBuilder() \
             .subject_name(subject) \
             .issuer_name(issuer) \
-            .public_key(key=pubkey) \
+            .public_key(key=issuer_pubkey) \
             .serial_number(number=x509.random_serial_number()) \
             .not_valid_before(now) \
             .not_valid_after(now + datetime.timedelta(days=validity_date)) \
@@ -55,12 +55,12 @@ class Equipment:
         return cert
         # self.verify_certif(cert1, self.key_pair_rsa.pubkey())
 
-    def verify_certif(self, cert, pubkey):
-        pubkey.verify(signature=cert.signature,
-                      data=cert.tbs_certificate_bytes,
-                      padding=padding.PKCS1v15(),
-                      algorithm=cert.signature_hash_algorithm)
-        print('{} certified with {}'.format(self.__name, pubkey))
+    def verify_certif(self, cert_to_check, public_key):
+        public_key.verify(signature=cert_to_check.signature,
+                          data=cert_to_check.tbs_certificate_bytes,
+                          padding=padding.PKCS1v15(),
+                          algorithm=cert_to_check.signature_hash_algorithm)
+        print('{} certified with {}'.format(self.__name, public_key))
         return True
 
 
