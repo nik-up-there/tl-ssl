@@ -79,7 +79,7 @@ class Interface(Frame):
         text = self.display_cert(cert)
         self.txt_box.delete("1.0", END)
         self.txt_box.insert(END, text)
-        nx.draw_networkx(self.graph, with_labels=True)
+        nx.draw_networkx(self.graph, with_labels=True, node_size=500, edge_color='r')
         plt.title('Network of equipment {}'.format(self.__id_equipment))
         plt.show()
 
@@ -368,18 +368,19 @@ class Interface(Frame):
                 server_finished = True
                 state = 'end'
             else:
-                if state == 'self_cert' and mode == 'insert':
-                    self_cert_received = self.state_self_cert(received_msg=received_msg)
-                elif state == 'self_cert' and mode == 'sync':
-                    tmp_self_cert_received = received_msg
-                    cert_chain = self.do_we_know_id(byte_cert=received_msg)
-                    if cert_chain:
-                        equipment_known = True
-                        for y in range(len(cert_chain)):
-                            msg.insert(i + 2 + y, cert_chain[y])
+                if state == 'self_cert':
+                    if mode == 'insert':
                         self_cert_received = self.state_self_cert(received_msg=received_msg)
-                    else:
-                        msg.insert(i + 2, 'not know')
+                    elif mode == 'sync':
+                        tmp_self_cert_received = received_msg
+                        cert_chain = self.do_we_know_id(byte_cert=received_msg)
+                        if cert_chain:
+                            equipment_known = True
+                            for y in range(len(cert_chain)):
+                                msg.insert(i + 2 + y, cert_chain[y])
+                            self_cert_received = self.state_self_cert(received_msg=received_msg)
+                        else:
+                            msg.insert(i + 2, 'not know')
                 elif state == 'proof':
                     if not cert_chain and received_msg == 'not know':
                         msg.insert(i, 'stop')
@@ -425,7 +426,13 @@ class Interface(Frame):
             chain_verified = False
         return chain_verified
 
-
+    """
+    Function state_self_cert:  
+        - receive a self_certificate from an other equipment in parameter
+        - verify it
+        - add a node in the graph 
+        Return {'id': subject, 'pubkey': pubkey, 'cert': cert}
+    """
     def state_self_cert(self, received_msg):
         cert = x509.load_pem_x509_certificate(received_msg.encode('utf-8'), backend=default_backend())
         pubkey = cert.public_key().public_bytes(encoding=serialization.Encoding.PEM,
@@ -446,14 +453,19 @@ class Interface(Frame):
             self.__da.append(self_cert_received)
         return self_cert_received
 
+    """
+        Function state_cert:  
+            - receive a certificate on our public key and the sel cert received from the ohter equipment in parameters
+            - verify it
+            - add a edge in the graph 
+    """
     def state_cert(self, received_msg, self_cert_received):
-        cert = x509.load_pem_x509_certificate(received_msg.encode('utf-8'),
-                                              backend=default_backend())
+        cert = x509.load_pem_x509_certificate(received_msg.encode('utf-8'), backend=default_backend())
         subject_pubkey = load_pem_public_key(self_cert_received['pubkey'], backend=default_backend())
         issuer = int(str(cert.issuer)[str(cert.issuer).find("=") + 1:str(cert.issuer).find(")")])
         subject = int(str(cert.subject)[str(cert.subject).find("=") + 1:str(cert.subject).find(")")])
-        self.graph.add_edge(subject, issuer, cert=cert)
         self.__e.verify_certif(cert, subject_pubkey)
+        self.graph.add_edge(subject, issuer, cert=cert)
         self.__da.append({'id': subject, 'pubkey': subject_pubkey, 'cert': cert})
 
     def state_ca(self, received_msg):
