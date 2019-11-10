@@ -29,9 +29,9 @@ class Certificate:
         # print('certificate generated')
         # auto-certification
         key_pair_rsa.pubkey().verify(signature=self.__cert.signature,
-                                   data=self.__cert.tbs_certificate_bytes,
-                                   padding=padding.PKCS1v15(),
-                                   algorithm=self.__cert.signature_hash_algorithm)
+                                     data=self.__cert.tbs_certificate_bytes,
+                                     padding=padding.PKCS1v15(),
+                                     algorithm=self.__cert.signature_hash_algorithm)
         print('certified with {}'.format(key_pair_rsa.pubkey))
         # affichage du certificat autosigné
         # print(self.__cert.public_bytes(encoding=serialization.Encoding.PEM).decode("utf-8"))

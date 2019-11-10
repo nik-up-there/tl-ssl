@@ -14,11 +14,8 @@ class Equipment:
     def __init__(self, name):
         self.__name = name
         print("{} created".format(name))
-        # self.__port = port
         self.__key = KeyPairRSA()
         self.__cert = Certificate(name=name, key_pair_rsa=self.__key, validity_date=10)
-        # print(self.__key.byte_pubkey())
-        # print(issuer_public_key)
 
     def name(self):
         return self.__name
@@ -52,34 +49,14 @@ class Equipment:
             .sign(private_key=self.__key.privkey(),
                   algorithm=hashes.SHA256(),
                   backend=default_backend())
+        print('certificate generate from {} on id {}'.format(subject, issuer))
         return cert
-        # self.verify_certif(cert1, self.key_pair_rsa.pubkey())
 
     def verify_certif(self, cert_to_check, public_key):
         public_key.verify(signature=cert_to_check.signature,
                           data=cert_to_check.tbs_certificate_bytes,
                           padding=padding.PKCS1v15(),
                           algorithm=cert_to_check.signature_hash_algorithm)
-        print('{} certified with {}'.format(self.__name, public_key))
+        # print('{} certified with {}'.format(self.__name, public_key))
         return True
-
-
-"""
-e1 = Equipment(name='e1')
-e2 = Equipment(name='e2')
-#e1.accept(e2)
-
-e1pubkey = e1.pubkey()
-e2pubkey = e2.pubkey()
-print(e1.name())
-# generate certificate of e1 in e2
-certificate_ofe2_ine1 = e1.generate_certificate(e2.name(), e2pubkey, 10)
-# generate certificate of e2 in e1
-certificate_ofe1_ine2 = e2.generate_certificate(e1.name(), e1pubkey, 10)
-print(certificate_ofe1_ine2)
-print(certificate_ofe2_ine1)
-
-e1.verify_certif(certificate_ofe1_ine2, e2pubkey)
-# txt = cert.public_bytes(encoding=serialization.Encoding.PEM).decode("utf-8").replace('\n', '')
-"""
 
