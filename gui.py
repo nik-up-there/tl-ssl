@@ -20,6 +20,14 @@ from equipment import Equipment
 EQUIPMENT_TYPES = ["client", "server"]
 
 
+def normalize_issuer_name(cert):
+    return int(str(cert.issuer)[str(cert.issuer).find("=") + 1:str(cert.issuer).find(")")])
+
+
+def normalize_subject_name(cert):
+    return int(str(cert.subject)[str(cert.subject).find("=") + 1:str(cert.subject).find(")")])
+
+
 class Interface(Frame):
     def __init__(self, window, id_equipment):
         Frame.__init__(self, window, width=900, height=900)
@@ -30,8 +38,8 @@ class Interface(Frame):
 
         # Button creation:
         self.but_new_equipment = Button(window, text='New equipment', command=self.click_new_equipment)
-        but_insert = Button(window, text='Insert', command=lambda: self.click_insert(mode='insert'))
-        but_sync = Button(window, text='Sync', command=lambda: self.click_insert(mode='sync'))
+        but_insert = Button(window, text='Insert', command=lambda: self.click_insert_or_sync(mode='insert'))
+        but_sync = Button(window, text='Sync', command=lambda: self.click_insert_or_sync(mode='sync'))
         but_info = Button(window, text='Information', command=self.click_info)
         but_CA = Button(window, text='CA', command=self.click_CA)
         but_DA = Button(window, text='DA', command=self.click_DA)
@@ -84,7 +92,7 @@ class Interface(Frame):
         list_neighbors = []
         neighbors = nx.all_neighbors(self.graph, self.__id_equipment)
         for neigh in neighbors:
-            # neighbors contains successor and predecessor
+            # neighbors contains successor and predecessor so we take into account only one of them
             if neigh not in list_neighbors:
                 list_neighbors.append(neigh)
                 text = self.display_cert(self.graph.get_edge_data(self.__id_equipment, neigh, 0)['cert'])
@@ -132,18 +140,21 @@ class Interface(Frame):
         f.title('Equipment {}'.format(self.__id_equipment + 1))
         Interface(window=f, id_equipment=self.__id_equipment + 1).mainloop()
 
-    def click_insert(self, mode):
+    def click_insert_or_sync(self, mode):
+        # preparation de la liste de messages
         port_number = self.port.get()
         if mode == 'insert':
             msg = ['self_cert', self.__e.byte_cert(), 'cert', 'da']
         elif mode == 'sync':
             msg = ['self_cert', self.__e.byte_cert()]
             for node in self.graph.nodes():
+                # pour ne pas renvoyer deux fois le self cert
                 if self.graph.nodes()[node]['cert'].public_bytes(
                         encoding=serialization.Encoding.PEM) != self.__e.byte_cert():
                     msg.append(self.graph.nodes()[node]['cert'].public_bytes(encoding=serialization.Encoding.PEM))
             msg += [b'end', 'cert', 'da']
 
+        # insertion des certs contenus dans ca U da
         for node in self.graph.nodes():
             cert = self.graph.nodes[node]['cert']
             msg.append(cert.public_bytes(encoding=serialization.Encoding.PEM))
@@ -152,6 +163,7 @@ class Interface(Frame):
             msg.append(cert.public_bytes(encoding=serialization.Encoding.PEM))
         msg.append(b'end')
 
+        # creation des threads client et serveur
         if self.equipment_type.get() == 'client':
             t = Thread(name='client_thread', target=self.client, args=(int(port_number), msg, mode,))
             t.start()
@@ -163,10 +175,14 @@ class Interface(Frame):
         result = 'no'
         issuer = int(self_cert_received['id'])
         if mode == 'insert':
-            result = askquestion('Equipment {} - Connection'.format(self.__id_equipment),
-                                 'Authorized Equipment {} to be connected ?'.format(issuer))
+            if len(self.graph.nodes()) > 2:
+                question = "Authorize Equipment {} to join our network ?".format(issuer)
+            else:
+                question = "Accept to join Equipment {}'s network ?".format(issuer)
+            result = askquestion('Equipment {} - Connection'.format(self.__id_equipment), question)
         elif mode == 'sync':
             result = 'yes'
+
         if result == 'yes':
             cert = self.__e.generate_certificate(str(issuer), self_cert_received['cert'].public_key(), 10)
             byte_cert = cert.public_bytes(encoding=serialization.Encoding.PEM)
@@ -187,8 +203,9 @@ class Interface(Frame):
         except:
             pass
         cert_to_identify = x509.load_pem_x509_certificate(byte_cert, backend=default_backend())
-        issuer_name = int(str(cert_to_identify.issuer)[
-                          str(cert_to_identify.issuer).find("=") + 1:str(cert_to_identify.issuer).find(")")])
+        # on fait verifier les certificat autosigne que l'on recoit
+        self.__e.verify_certif(cert_to_identify, cert_to_identify.public_key())
+        issuer_name = normalize_issuer_name(cert_to_identify)
 
         if issuer_name in self.graph.nodes():
             print('Id {} found in graph of id {}'.format(issuer_name, self.__id_equipment))
@@ -207,7 +224,7 @@ class Interface(Frame):
         tmp_self_cert_received = None
         main_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         main_connection.bind((host, num_port))
-        main_connection.listen(5)
+        main_connection.listen(1)
         print("Server listen on port {}".format(num_port))
 
         connected_clients = []
@@ -232,12 +249,13 @@ class Interface(Frame):
                 pass
             else:
                 for client in clients_a_lire:
-
+                    # reception message
                     received_msg = client.recv(2048)
                     try:
                         received_msg = received_msg.decode()
                     except:
                         pass
+                    # handle if mesage = string -> change state
                     if received_msg == 'stop':
                         print('Id {} received STOP'.format(self.__id_equipment))
                         self.graph.remove_node(self_cert_received['id'])
@@ -252,7 +270,7 @@ class Interface(Frame):
                         state = 'proof'
                         if not equipment_known:
                             cert_to_use_maybe = msg[i - 1]
-                            self_cert_received = self.state_self_cert(received_msg=tmp_self_cert_received)
+                            self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
                             cert_chain = self.do_we_know_id(byte_cert=cert_to_use_maybe)
                             if cert_chain:
                                 equipment_known = True
@@ -275,9 +293,10 @@ class Interface(Frame):
                     elif received_msg == 'end':
                         client_finished = True
                         state = 'end'
+                    # if receive = byte object
                     else:
                         if state == 'self_cert' and mode == 'insert':
-                            self_cert_received = self.state_self_cert(received_msg=received_msg)
+                            self_cert_received = self.verify_self_cert_received(received_msg=received_msg)
                         elif state == 'self_cert' and mode == 'sync':
                             if tmp_self_cert_received is None:
                                 tmp_self_cert_received = received_msg
@@ -288,7 +307,7 @@ class Interface(Frame):
                                     msg = [msg[k] for k in range(i + 1)] + ['proof'] + msg[msg.index(b'end') + 1:]
                                     for y in range(len(cert_chain)):
                                         msg.insert(i + 2 + y, cert_chain[y])
-                                    self_cert_received = self.state_self_cert(received_msg=tmp_self_cert_received)
+                                    self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
                         elif state == 'proof':
                             if not cert_chain and received_msg == 'not know':
                                 msg.insert(i, 'stop')
@@ -299,7 +318,7 @@ class Interface(Frame):
                             self.state_cert(received_msg=received_msg, self_cert_received=self_cert_received)
                         elif state == 'da':
                             tmp_da.append(received_msg)
-
+                    # send message
                     if server_finished:
                         msg_to_send = 'No more message to send'
                     else:
@@ -308,13 +327,13 @@ class Interface(Frame):
                         msg_to_send = msg[i]
 
                         if msg_to_send == 'cert':
-                            if mode == 'insert':
-                                msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
-                                if msg[i + 1] == b'end':
-                                    msg_to_send = b'stop'
-                                    state = 'end'
-                            else:
-                                msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
+                            #if mode == 'insert':
+                            msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
+                            if msg[i + 1] == b'end':
+                                msg_to_send = b'stop'
+                                state = 'end'
+                            #else:
+                            #   msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
                     try:
                         msg_to_send = msg_to_send.encode()
                     except:
@@ -323,7 +342,7 @@ class Interface(Frame):
                     i += 1
 
         if tmp_da:
-            self.state_ca(received_msg=tmp_da)
+            self.state_da(received_msg=tmp_da)
         print("Closing connections")
         for client in connected_clients:
             client.close()
@@ -345,6 +364,7 @@ class Interface(Frame):
         i = 0
         equipment_known = False
         while not client_finished or not server_finished:
+            # Sending messages
             if client_finished:
                 msg_to_send = 'No more message to send'
             else:
@@ -352,28 +372,26 @@ class Interface(Frame):
                     client_finished = True
                 msg_to_send = msg[i]
                 if msg_to_send == 'cert':
-                    if mode == 'insert':
-                        msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
-                        if msg[i + 1] == b'end':
-                            msg_to_send = b'stop'
-                            state = 'end'
-                    else:
-                        msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
+                    #if mode == 'insert':
+                    msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
+                    if msg[i + 1] == b'end':
+                        msg_to_send = b'stop'
+                        state = 'end'
+                    #else:
+                    #   msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
             try:
                 msg_to_send = msg_to_send.encode()
             except:
                 pass
-            # Sending messages
-            # print('client send {}'.format(msg_to_send))
             connection_with_server.send(msg_to_send)
 
-            # Received messages
+            # handle messages reception
             received_msg = connection_with_server.recv(2048)
             try:
                 received_msg = received_msg.decode()
             except:
                 pass
-            # print('client rcv {}'.format(received_msg.encode()))
+            # change state if receive str
             if received_msg == 'stop':
                 print('Id {} received STOP'.format(self.__id_equipment))
                 self.graph.remove_node(self_cert_received['id'])
@@ -388,7 +406,7 @@ class Interface(Frame):
                 state = 'proof'
                 if not equipment_known:
                     cert_to_use = msg[i]
-                    self_cert_received = self.state_self_cert(received_msg=tmp_self_cert_received)
+                    self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
                     cert_chain = self.do_we_know_id(byte_cert=cert_to_use)
                     if cert_chain:
                         msg = [msg[k] for k in range(i + 1)] + ['proof'] + msg[msg.index(b'end') + 1:]
@@ -411,9 +429,10 @@ class Interface(Frame):
             elif received_msg == 'end':
                 server_finished = True
                 state = 'end'
+            # receive data (depends on state)
             else:
                 if state == 'self_cert' and mode == 'insert':
-                    self_cert_received = self.state_self_cert(received_msg=received_msg)
+                    self_cert_received = self.verify_self_cert_received(received_msg=received_msg)
                 elif state == 'self_cert' and mode == 'sync':
                     if tmp_self_cert_received is None:
                         tmp_self_cert_received = received_msg
@@ -426,7 +445,7 @@ class Interface(Frame):
                             msg = [msg[k] for k in range(i + 1)] + ['proof'] + msg[msg.index(b'end') + 1:]
                             for y in range(len(cert_chain)):
                                 msg.insert(i + 2 + y, cert_chain[y])
-                            self_cert_received = self.state_self_cert(received_msg=tmp_self_cert_received)
+                            self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
                 elif state == 'proof':
                     if not cert_chain and received_msg == 'not know':
                         msg.insert(i, 'stop')
@@ -438,11 +457,10 @@ class Interface(Frame):
                 elif state == 'da':
                     tmp_da.append(received_msg)
             i += 1
-            # To give time to server to receive messages
-            time.sleep(0.1)
+            time.sleep(0.1)  # To give time to server to receive messages
 
         if tmp_da:
-            self.state_ca(received_msg=tmp_da)
+            self.state_da(received_msg=tmp_da)
         print('Closing client')
         connection_with_server.close()
 
@@ -464,7 +482,9 @@ class Interface(Frame):
             chain_verified = False
         return chain_verified
 
-    def state_self_cert(self, received_msg):
+    def verify_self_cert_received(self, received_msg):
+        # appelle uniquement apres avoir verifier la chaine de certification pour le mode sync
+        # pour ne pas ajouter un node en trop
         """
         :param received_msg: receive a self_certificate from another equipment
         - verify it
@@ -474,20 +494,20 @@ class Interface(Frame):
         cert = x509.load_pem_x509_certificate(received_msg.encode('utf-8'), backend=default_backend())
         byte_pubkey = cert.public_key().public_bytes(encoding=serialization.Encoding.PEM,
                                                      format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        self_cert_received = None
         try:
             cert.public_key().verify(signature=cert.signature,
                                      data=cert.tbs_certificate_bytes,
                                      padding=padding.PKCS1v15(),
                                      algorithm=cert.signature_hash_algorithm)
+            subject = normalize_subject_name(cert)
+            if subject not in self.graph.nodes():
+                self.graph.add_node(subject, cert=cert)
+            else:
+                self.graph.nodes()[subject]['cert'] = cert
+            self_cert_received = {'id': subject, 'pubkey': byte_pubkey, 'cert': cert}
         except InvalidSignature:
             print('ERROR : Self certificate unverified')
-
-        subject = int(str(cert.subject)[str(cert.subject).find("=") + 1:str(cert.subject).find(")")])
-        if subject not in self.graph.nodes():
-            self.graph.add_node(subject, cert=cert)
-        else:
-            self.graph.nodes()[subject]['cert'] = cert
-        self_cert_received = {'id': subject, 'pubkey': byte_pubkey, 'cert': cert}
         return self_cert_received
 
     def state_cert(self, received_msg, self_cert_received):
@@ -500,21 +520,20 @@ class Interface(Frame):
         """
         cert = x509.load_pem_x509_certificate(received_msg.encode('utf-8'), backend=default_backend())
         subject_pubkey = load_pem_public_key(self_cert_received['pubkey'], backend=default_backend())
-        issuer = int(str(cert.issuer)[str(cert.issuer).find("=") + 1:str(cert.issuer).find(")")])
-        subject = int(str(cert.subject)[str(cert.subject).find("=") + 1:str(cert.subject).find(")")])
+        issuer = normalize_issuer_name(cert)
+        subject = normalize_subject_name(cert)
         self.__e.verify_certif(cert, subject_pubkey)
+        # remove puis add pour remettre un nouveau certif avec nouvelle date de peremption
         if (subject, issuer) in self.graph.edges():
             self.graph.remove_edge(subject, issuer)
         self.graph.add_edge(subject, issuer, cert=cert)
 
-    def state_ca(self, received_msg):
+    def state_da(self, received_msg):
         while received_msg:
             for rcv_msg in received_msg:
                 cert_to_check = x509.load_pem_x509_certificate(rcv_msg.encode('utf-8'), backend=default_backend())
-                issuer = int(str(cert_to_check.issuer)[
-                             str(cert_to_check.issuer).find("=") + 1:str(cert_to_check.issuer).find(")")])
-                subject = int(str(cert_to_check.subject)[
-                              str(cert_to_check.subject).find("=") + 1:str(cert_to_check.subject).find(")")])
+                issuer = normalize_issuer_name(cert_to_check)
+                subject = normalize_subject_name(cert_to_check)
 
                 if issuer == subject:
                     if subject not in self.graph.nodes():
