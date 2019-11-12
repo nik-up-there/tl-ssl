@@ -5,7 +5,7 @@ from cryptography.hazmat.backends import default_backend
 
 class KeyPairRSA:
     def __init__(self):
-        self.__key = rsa.generate_private_key(65537, 2048, default_backend())
+        self.__key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
         print('key pair created')
 
     def pubkey(self):
