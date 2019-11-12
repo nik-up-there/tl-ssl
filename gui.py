@@ -40,9 +40,9 @@ class Interface(Frame):
         self.but_new_equipment = Button(window, text='New equipment', command=self.click_new_equipment)
         but_insert = Button(window, text='Insert', command=lambda: self.click_insert_or_sync(mode='insert'))
         but_sync = Button(window, text='Sync', command=lambda: self.click_insert_or_sync(mode='sync'))
-        but_info = Button(window, text='Information', command=self.click_info)
+        but_info = Button(window, text='Graph\nInformation', command=self.click_info)
         but_CA = Button(window, text='CA', command=self.click_CA)
-        but_DA = Button(window, text='DA', command=self.click_DA)
+        but_DA = Button(window, text='All cert', command=self.click_DA)
 
         # New equipment
         self.txt_equipment_type = Label(window, text='Type of this equipment', wraplength=70)
@@ -211,7 +211,7 @@ class Interface(Frame):
             print('Id {} found in graph of id {}'.format(issuer_name, self.__id_equipment))
             shortest_path = nx.shortest_path(self.graph, source=issuer_name,
                                              target=self.__id_equipment, method='dijkstra')
-            for i in range(len(shortest_path) - 1):
+            for i in range(0, len(shortest_path) - 1):
                 cert = self.graph.get_edge_data(shortest_path[i], shortest_path[i + 1], 0)['cert']
                 byte_cert = cert.public_bytes(encoding=serialization.Encoding.PEM)
                 cert_chain.append(byte_cert)
@@ -269,9 +269,9 @@ class Interface(Frame):
                     elif received_msg == 'proof':
                         state = 'proof'
                         if not equipment_known:
-                            cert_to_use_maybe = msg[i - 1]
+                            cert_to_use = msg[i - 1]
                             self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
-                            cert_chain = self.do_we_know_id(byte_cert=cert_to_use_maybe)
+                            cert_chain = self.do_we_know_id(byte_cert=cert_to_use)
                             if cert_chain:
                                 equipment_known = True
                                 msg = [msg[k] for k in range(i)] + ['proof'] + msg[msg.index(b'end') + 1:]
@@ -280,14 +280,13 @@ class Interface(Frame):
                     elif received_msg == 'cert':
                         if mode == 'insert':
                             state = 'cert'
-                        else:
-                            if not equipment_known and not self.verify_proof(cert_chain_other_equipment,
-                                                                             self_cert_received):
-                                print('Client not known or unverified')
-                                server_finished = True
-                                client_finished = True
-                            else:
+                        elif mode == 'sync':
+                            if self.verify_proof(cert_chain_other_equipment, self_cert_received, cert_to_use):
                                 state = 'cert'
+                            else:
+                                print('Client not known or unverified')
+                                msg.insert(i, 'stop')
+                                state = 'end'
                     elif received_msg == 'da':
                         state = 'da'
                     elif received_msg == 'end':
@@ -303,16 +302,16 @@ class Interface(Frame):
                             elif not equipment_known:
                                 cert_chain = self.do_we_know_id(byte_cert=received_msg)
                                 if cert_chain:
+                                    cert_to_use = received_msg
                                     equipment_known = True
-                                    msg = [msg[k] for k in range(i + 1)] + ['proof'] + msg[msg.index(b'end') + 1:]
+                                    msg = [msg[k] for k in range(0, i)] + ['proof'] + msg[msg.index(b'end') + 1:]
                                     for y in range(len(cert_chain)):
-                                        msg.insert(i + 2 + y, cert_chain[y])
+                                        msg.insert(i + 1 + y, cert_chain[y])
                                     self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
                         elif state == 'proof':
-                            if not cert_chain and received_msg == 'not know':
+                            if not cert_chain:
                                 msg.insert(i, 'stop')
-                            elif not cert_chain:
-                                msg.insert(i, 'not know')
+                            else:
                                 cert_chain_other_equipment.append(received_msg)
                         elif state == 'cert':
                             self.state_cert(received_msg=received_msg, self_cert_received=self_cert_received)
@@ -327,13 +326,10 @@ class Interface(Frame):
                         msg_to_send = msg[i]
 
                         if msg_to_send == 'cert':
-                            #if mode == 'insert':
                             msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
                             if msg[i + 1] == b'end':
                                 msg_to_send = b'stop'
                                 state = 'end'
-                            #else:
-                            #   msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
                     try:
                         msg_to_send = msg_to_send.encode()
                     except:
@@ -372,13 +368,11 @@ class Interface(Frame):
                     client_finished = True
                 msg_to_send = msg[i]
                 if msg_to_send == 'cert':
-                    #if mode == 'insert':
                     msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
                     if msg[i + 1] == b'end':
                         msg_to_send = b'stop'
                         state = 'end'
-                    #else:
-                    #   msg.insert(i + 1, self.insertion_equipment(self_cert_received, mode))
+
             try:
                 msg_to_send = msg_to_send.encode()
             except:
@@ -391,6 +385,7 @@ class Interface(Frame):
                 received_msg = received_msg.decode()
             except:
                 pass
+
             # change state if receive str
             if received_msg == 'stop':
                 print('Id {} received STOP'.format(self.__id_equipment))
@@ -416,14 +411,13 @@ class Interface(Frame):
             elif received_msg == 'cert':
                 if mode == 'insert':
                     state = 'cert'
-                else:
-                    # Si l'on connait déjà l'equipement pas besoin de vérifier la chaine de certificat
-                    if not equipment_known and not self.verify_proof(cert_chain_other_equipment, self_cert_received):
-                        print('Server not known or unverified')
-                        server_finished = True
-                        client_finished = True
-                    else:
+                elif mode == 'sync':
+                    if self.verify_proof(cert_chain_other_equipment, self_cert_received, cert_to_use):
                         state = 'cert'
+                    else:
+                        print('Server not known or unverified')
+                        msg.insert(i+1, 'stop')
+                        state = 'end'
             elif received_msg == 'da':
                 state = 'da'
             elif received_msg == 'end':
@@ -441,16 +435,16 @@ class Interface(Frame):
                     elif not equipment_known:
                         cert_chain = self.do_we_know_id(byte_cert=received_msg)
                         if cert_chain:
+                            cert_to_use = received_msg
                             equipment_known = True
                             msg = [msg[k] for k in range(i + 1)] + ['proof'] + msg[msg.index(b'end') + 1:]
                             for y in range(len(cert_chain)):
                                 msg.insert(i + 2 + y, cert_chain[y])
                             self_cert_received = self.verify_self_cert_received(received_msg=tmp_self_cert_received)
                 elif state == 'proof':
-                    if not cert_chain and received_msg == 'not know':
-                        msg.insert(i, 'stop')
-                    elif not cert_chain:
-                        msg.insert(i, 'not know')
+                    if not cert_chain:
+                        msg.insert(i+1, 'stop')
+                    else:
                         cert_chain_other_equipment.append(received_msg)
                 elif state == 'cert':
                     self.state_cert(received_msg=received_msg, self_cert_received=self_cert_received)
@@ -464,9 +458,15 @@ class Interface(Frame):
         print('Closing client')
         connection_with_server.close()
 
-    def verify_proof(self, cert_chain, self_cert_received):
+    def verify_proof(self, cert_chain, self_cert_received, byte_cert_of_the_common_id):
         chain_verified = True
-        previous_pubkey = self.__e.pubkey()
+        try:
+            byte_cert_of_the_common_id = byte_cert_of_the_common_id.encode('utf-8')
+        except:
+            pass
+        pubkey_of_the_common_id = x509.load_pem_x509_certificate(byte_cert_of_the_common_id,
+                                                                 backend=default_backend()).public_key()
+        previous_pubkey = pubkey_of_the_common_id
         for byte_cert in cert_chain:
             cert = x509.load_pem_x509_certificate(byte_cert.encode('utf-8'), backend=default_backend())
             try:
@@ -475,9 +475,10 @@ class Interface(Frame):
             except InvalidSignature:
                 print('Certificate invalid {}'.format(cert))
                 chain_verified = False
-        byte_prev_pubkey = previous_pubkey.public_bytes(encoding=serialization.Encoding.PEM,
-                                                        format=serialization.PublicFormat.SubjectPublicKeyInfo)
-        if byte_prev_pubkey != self_cert_received['pubkey']:
+
+        try:
+            self.__e.verify_certif(self_cert_received['cert'], previous_pubkey)
+        except InvalidSignature:
             print('Not the good self pubkey')
             chain_verified = False
         return chain_verified
