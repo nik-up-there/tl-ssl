@@ -12,7 +12,7 @@ class Certificate:
         self.__key_pair_rsa = key_pair_rsa
         self.__name = name
         now = datetime.datetime.utcnow()
-        # Creation du certificat
+        # Creation du self certificat
         subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
         self.__cert = x509.CertificateBuilder() \
             .subject_name(subject) \
@@ -26,15 +26,13 @@ class Certificate:
             .sign(private_key=key_pair_rsa.privkey(),
                   algorithm=hashes.SHA256(),
                   backend=default_backend())
-        # print('certificate generated')
-        # auto-certification
+        print('self cert created')
+        # verification du self certificat
         key_pair_rsa.pubkey().verify(signature=self.__cert.signature,
                                      data=self.__cert.tbs_certificate_bytes,
                                      padding=padding.PKCS1v15(),
                                      algorithm=self.__cert.signature_hash_algorithm)
-        print('certified with {}'.format(key_pair_rsa.pubkey))
-        # affichage du certificat autosigné
-        # print(self.__cert.public_bytes(encoding=serialization.Encoding.PEM).decode("utf-8"))
+        print('self cert verify with {}'.format(key_pair_rsa.pubkey))
 
     def cert(self):
         return self.__cert

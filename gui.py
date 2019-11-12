@@ -96,10 +96,12 @@ class Interface(Frame):
     def click_DA(self):
         self.txt_box.delete("1.0", END)
         cpt = 0
+        # add self cert in da
         for node in self.graph.nodes():
             cpt += 1
             text = self.display_cert(self.graph.nodes[node]['cert'])
             self.txt_box.insert(END, text)
+        # add cert in da (including those already in ca)
         for edge in self.graph.edges():
             cpt += 1
             text = self.display_cert(self.graph.get_edge_data(edge[0], edge[1], 0)['cert'])
@@ -117,7 +119,9 @@ class Interface(Frame):
                 str(cert.subject)[str(cert.subject).find("=") + 1:str(cert.subject).find(")")]),
             'Issuer name : {}'.format(
                 str(cert.issuer)[str(cert.issuer).find("=") + 1:str(cert.issuer).find(")")]),
-            'Signature algorithm : {}'.format(cert.signature_algorithm_oid),
+            'Signature algorithm : {}'.format('SHA256'
+                                              if cert.signature_algorithm_oid.dotted_string == "1.2.840.113549.1.1.11"
+                                              else 'Unknown algorithm'),  # utilisation d'un dico de correspondance
             '\n\n'
         ])
         return text
@@ -135,7 +139,8 @@ class Interface(Frame):
         elif mode == 'sync':
             msg = ['self_cert', self.__e.byte_cert()]
             for node in self.graph.nodes():
-                if self.graph.nodes()[node]['cert'].public_bytes(encoding=serialization.Encoding.PEM) != self.__e.byte_cert():
+                if self.graph.nodes()[node]['cert'].public_bytes(
+                        encoding=serialization.Encoding.PEM) != self.__e.byte_cert():
                     msg.append(self.graph.nodes()[node]['cert'].public_bytes(encoding=serialization.Encoding.PEM))
             msg += [b'end', 'cert', 'da']
 
@@ -170,7 +175,6 @@ class Interface(Frame):
             self.graph.add_edge(self.__id_equipment, issuer, cert=cert)
             return byte_cert
         else:
-            self.graph.remove_node(issuer)
             txt = "No connection established"
             self.txt_box.delete("1.0", END)
             self.txt_box.insert(END, txt)
@@ -178,7 +182,6 @@ class Interface(Frame):
 
     def do_we_know_id(self, byte_cert):
         cert_chain = []
-        we_know_the_equipment_directly = False
         try:
             byte_cert = byte_cert.encode('utf-8')
         except:
@@ -237,6 +240,7 @@ class Interface(Frame):
                         pass
                     if received_msg == 'stop':
                         print('Id {} received STOP'.format(self.__id_equipment))
+                        self.graph.remove_node(self_cert_received['id'])
                         server_finished = True
                         client_finished = True
                         client.send('stop'.encode())
@@ -372,6 +376,7 @@ class Interface(Frame):
             # print('client rcv {}'.format(received_msg.encode()))
             if received_msg == 'stop':
                 print('Id {} received STOP'.format(self.__id_equipment))
+                self.graph.remove_node(self_cert_received['id'])
                 server_finished = True
                 client_finished = True
                 connection_with_server.send('stop'.encode())

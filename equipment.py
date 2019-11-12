@@ -1,6 +1,5 @@
 import datetime
 from cryptography import x509
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
@@ -34,7 +33,7 @@ class Equipment:
 
     def generate_certificate(self, issuer_name, issuer_pubkey, validity_date):
         now = datetime.datetime.utcnow()
-        # Creation du certificat
+        # Creation d'un certificat
         subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, self.__name)])
         issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)])
         cert = x509.CertificateBuilder() \
@@ -49,7 +48,7 @@ class Equipment:
             .sign(private_key=self.__key.privkey(),
                   algorithm=hashes.SHA256(),
                   backend=default_backend())
-        print('certificate generate from {} on id {}'.format(subject, issuer))
+        print('certificate generate by Equipment {} on Equipment {}\'s public key'.format(subject, issuer))
         return cert
 
     def verify_certif(self, cert_to_check, public_key):
@@ -57,6 +56,6 @@ class Equipment:
                           data=cert_to_check.tbs_certificate_bytes,
                           padding=padding.PKCS1v15(),
                           algorithm=cert_to_check.signature_hash_algorithm)
-        # print('{} certified with {}'.format(self.__name, public_key))
+        print('Certificate verified')
         return True
 
