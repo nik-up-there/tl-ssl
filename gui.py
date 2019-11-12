@@ -21,7 +21,7 @@ EQUIPMENT_TYPES = ["client", "server"]
 
 
 class Interface(Frame):
-    def __init__(self, window, id_equipment=1):
+    def __init__(self, window, id_equipment):
         Frame.__init__(self, window, width=900, height=900)
         self.__id_equipment = id_equipment
         self.__e = Equipment(name=str(id_equipment))
