@@ -464,9 +464,11 @@ class Interface(Frame):
             byte_cert_of_the_common_id = byte_cert_of_the_common_id.encode('utf-8')
         except:
             pass
+        # recuperation de la clef publique de l'autorite moyenne
         pubkey_of_the_common_id = x509.load_pem_x509_certificate(byte_cert_of_the_common_id,
                                                                  backend=default_backend()).public_key()
         previous_pubkey = pubkey_of_the_common_id
+        # verification de la chaine de certification en extrayant la clef publique du precedent certificat
         for byte_cert in cert_chain:
             cert = x509.load_pem_x509_certificate(byte_cert.encode('utf-8'), backend=default_backend())
             try:
@@ -475,12 +477,14 @@ class Interface(Frame):
             except InvalidSignature:
                 print('Certificate invalid {}'.format(cert))
                 chain_verified = False
-
+        # verification que la derniere clef publique qui porte sur l'element que l'on veut synchroniser
         try:
             self.__e.verify_certif(self_cert_received['cert'], previous_pubkey)
         except InvalidSignature:
             print('Not the good self pubkey')
             chain_verified = False
+        if chain_verified:
+            print('Cert chain verified in id {}'.format(self.__id_equipment))
         return chain_verified
 
     def verify_self_cert_received(self, received_msg):
@@ -530,21 +534,29 @@ class Interface(Frame):
         self.graph.add_edge(subject, issuer, cert=cert)
 
     def state_da(self, received_msg):
+        """
+        add all graph of the other equipment while verifying every cert we receive with a
+        public key we already know in our graph
+        :param received_msg:
+        :return:
+        """
         while received_msg:
             for rcv_msg in received_msg:
                 cert_to_check = x509.load_pem_x509_certificate(rcv_msg.encode('utf-8'), backend=default_backend())
                 issuer = normalize_issuer_name(cert_to_check)
                 subject = normalize_subject_name(cert_to_check)
-
+                # on ajoute noeuds et cert
                 if issuer == subject:
+                    # si le node n'existe pas dans le graph
                     if subject not in self.graph.nodes():
                         self.__e.verify_certif(cert_to_check, cert_to_check.public_key())
                         self.graph.add_node(subject, cert=cert_to_check)
+                    # ou si le noeud existe déjà mais qu'il n'y a pas le certificat associe
                     elif self.graph.nodes()[subject] == {}:
                         self.__e.verify_certif(cert_to_check, cert_to_check.public_key())
                         self.graph.add_node(subject, cert=cert_to_check)
                     received_msg.remove(rcv_msg)
-                else:
+                else: # on travaille sur les edges
                     if (subject, issuer) in self.graph.edges():
                         received_msg.remove(rcv_msg)
                     else:

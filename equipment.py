@@ -56,6 +56,6 @@ class Equipment:
                           data=cert_to_check.tbs_certificate_bytes,
                           padding=padding.PKCS1v15(),
                           algorithm=cert_to_check.signature_hash_algorithm)
-        print('Certificate verified')
+        # print('Certificate verified')
         return True
 
