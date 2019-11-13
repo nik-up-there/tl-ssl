@@ -464,7 +464,7 @@ class Interface(Frame):
             byte_cert_of_the_common_id = byte_cert_of_the_common_id.encode('utf-8')
         except:
             pass
-        # recuperation de la clef publique de l'autorite moyenne
+        # recuperation de la clef publique de l'autorite racine
         pubkey_of_the_common_id = x509.load_pem_x509_certificate(byte_cert_of_the_common_id,
                                                                  backend=default_backend()).public_key()
         previous_pubkey = pubkey_of_the_common_id
